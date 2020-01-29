@@ -6,31 +6,55 @@ import java.net.InetSocketAddress;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
+import java.util.Iterator;
 
-public class Server {
+public class Server extends Thread{
 	private Selector selector;
-	private ServerSocketChannel serverSocketChannel;
-	private InetAddress ip;
+	private ServerSocketChannel serverChannel;
 	private int port;
 	
-	public Server() {
+	public Server(int port) {
+		this.port = port;
 		try {
 			selector = Selector.open();
-			serverSocketChannel = ServerSocketChannel.open();
-			serverSocketChannel.configureBlocking(false);
-			ip = InetAddress.getByName("localhost");
+			serverChannel = ServerSocketChannel.open();
+			serverChannel.configureBlocking(false);
+			serverChannel.bind(new InetSocketAddress("localhost", port));
+			serverChannel.register(selector, SelectionKey.OP_ACCEPT);
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
 	}
 	
-	public void init(int port) {
+	@Override
+	public void run() {
 		try {
-			this.port = port;
-			serverSocketChannel.bind(new InetSocketAddress(ip, port));
-			serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
+			while(!Thread.currentThread().isInterrupted()) {
+				selector.select();
+				
+				Iterator<SelectionKey> keys = selector.selectedKeys().iterator();
+				while(keys.hasNext()) {
+					SelectionKey key = keys.next();
+					keys.remove();
+					
+					if(!key.isValid()) {
+						continue;
+					}
+					
+					if(key.isAcceptable()) {
+						System.out.println("Accepting connection");
+			            accept(key);
+					}
+					
+				}
+			}
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+		
+	}
+	
+	private void accept(SelectionKey key) {
+		
 	}
 }
