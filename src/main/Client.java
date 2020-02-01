@@ -1,124 +1,56 @@
 package main;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
-import java.net.Socket;
-import java.net.SocketTimeoutException;
-import java.net.UnknownHostException;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.channels.SocketChannel;
+import java.nio.charset.Charset;
 
 public class Client extends Thread {
-    private static final String MSG_HEARTBEAT_PING = "msg_hb_ping";
-    private static final String MSG_HEARTBEAT_PONG = "msg_hb_pong";
-    private static final long HB_TIMEOUT_INTERVAL = 2000;
+    private final static String HOSTNAME = "localhost";
+    private final static int PORT = 6969;
 
-    static int counter = 0;
-    static Timer timer;
+    SocketChannel channel;
 
-    static long lastRead = -1;
-    static boolean active = true;
+    @Override
+    public void run() {
+    	try {
+    	channel = SocketChannel.open();
+        // we open this channel in non blocking mode
+        channel.configureBlocking(false);
+        channel.connect(new InetSocketAddress(HOSTNAME, PORT));
 
-    static Socket kkSocket;
-
-    public Client(String hostName, int portNumber)
-    {
-
-        try {
-            kkSocket = new Socket(hostName, portNumber);
-            PrintWriter out = new PrintWriter(kkSocket.getOutputStream(), true);
-            BufferedReader in = new BufferedReader(new InputStreamReader(kkSocket.getInputStream()));
-
-            kkSocket.setSoTimeout(0);
-            kkSocket.setKeepAlive(true);
-            kkSocket.setTcpNoDelay(true);
-
-            BufferedReader stdIn = new BufferedReader(new InputStreamReader(System.in));
-            String fromServer;
-            String fromUser;
-
-            //create thread to print counter value
-            Thread t = new Thread(() -> {
-                while (true) {
-                    try {
-                        System.out.println("Thread reading counter is: " + counter);
-                        if (counter > 10) {
-                            active = false;
-                            System.out.println("isConnected() " + kkSocket.isConnected());
-                            System.out.println("isClosed() " + kkSocket.isClosed());
-                            System.out.println("read() " + in.read());
-                            out.write(MSG_HEARTBEAT_PONG);
-                            System.out.println("write() ");
-
-                            System.out.println("Counter has reached 10 now will terminate");
-                            timer.cancel();//end the timer
-                            break;//end this loop
-                        }
-                        Thread.sleep(1000);
-                    } catch (InterruptedException | IOException ex) {
-                        ex.printStackTrace();
-                    }
-                }
-            });
-
-            timer = new Timer("MyTimer");//create a new timer
-            timer.scheduleAtFixedRate(new TimerTask()
-            {
-                @Override
-                public void run()
-                {
-                    if ((HB_TIMEOUT_INTERVAL > 0) && ((System.currentTimeMillis() - lastRead) > HB_TIMEOUT_INTERVAL)) {
-                        System.out.println("lastRead: " + (lastRead));
-                        System.out.println("Diff: " + (System.currentTimeMillis() - lastRead));
-                        counter++;
-                        // no reply to heartbeat received.
-                        // end the loop and perform a reconnect.
-                    }
-                }
-            }, 30, 200);
-
-            t.start();//start thread to display counter
-
-            while (active) {
-                try {
-                    while ((fromServer = in.readLine()) != null) {
-                        System.out.println("Server: " + fromServer);
-                        if (fromServer.equals("Bye.")) break;
-
-                        lastRead = System.currentTimeMillis();
-                        if (MSG_HEARTBEAT_PING.equals(fromServer)) continue;
-
-//                        fromUser = stdIn.readLine();
-//                        if (fromUser != null) {
-//                            System.out.println("Client: " + fromUser);
-//                            out.println(fromUser);
-//                        }
-                    }
-                    System.out.println("Line was null.");
-                } catch (SocketTimeoutException ste) {
-//                    ste.printStackTrace();
-                    // in a typical situation the soTimeout should be about 200ms
-                    // the heartbeat interval is usually a couple of seconds.
-                    // and the heartbeat timeout interval a couple of seconds more.
-                    if ((HB_TIMEOUT_INTERVAL > 0) && ((System.currentTimeMillis() - lastRead) > HB_TIMEOUT_INTERVAL)) {
-                        System.err.println("lastRead: " + (lastRead));
-                        System.err.println("Diff: " + (System.currentTimeMillis() - lastRead));
-                        // no reply to heartbeat received.
-                        // end the loop and perform a reconnect.
-                        break;
-                    }
-                    // simple read timeout
-                }
+        while (!channel.finishConnect()) {
+            // System.out.println("still connecting");
+        }
+        while (true) {
+            // See if any message has been received
+            ByteBuffer bufferA = ByteBuffer.allocate(20);
+            String message = "";
+            while (channel.read(bufferA) > 0) {
+                // Flip the buffer to start reading
+                bufferA.flip();
+                message += Charset.defaultCharset().decode(bufferA);
             }
-        } catch (UnknownHostException e) {
-            System.err.println("Don't know about host " + hostName);
-            System.exit(1);
-        } catch (IOException e) {
-            System.err.println("Couldn't get I/O for the connection to " +
-                    hostName);
-            System.exit(1);
+
+            if (message.length() > 0) {
+                System.out.println(message);
+                write("Hello Server!");
+                message = "";
+            }
+        }
+    	}catch(Exception e) {
+    		e.printStackTrace();
+    	}
+    }
+    
+    private void write(String message) throws IOException {
+    	CharBuffer buffer = CharBuffer.wrap(message);
+        while (buffer.hasRemaining()) {
+            channel.write(Charset.defaultCharset().encode(buffer));
         }
     }
+    
+    
 }

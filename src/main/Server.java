@@ -1,74 +1,144 @@
 package main;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.util.Timer;
+import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
+import java.nio.charset.Charset;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Set;
 
-public class Server extends Thread {
-    private static final String MSG_HEARTBEAT_PING = "msg_hb_ping";
-    private static final String MSG_HEARTBEAT_PONG = "msg_hb_pong";
+public class Server extends Thread{
+    private final static String CLIENT_CHANNEL = "clientChannel";
+    private final static String SERVER_CHANNEL = "serverChannel";
+    private final static String CHANNEL_TYPE = "channelType";
 
-    static int counter = 0;
-    static Timer timer;
+    private final static String HOSTNAME = "localhost";
+    private final static int PORT = 6969;
 
-    public Server(int port) {
+    /**
+     * ServerSocketChannel represents a channel for sockets that listen to
+     * incoming connections.
+     */
+    @Override
+    public void run() {
+    	try {
+        // Create a new ServerSocketChannel. The channel is unbound.
+        ServerSocketChannel channel = ServerSocketChannel.open();
 
-        try (
-                ServerSocket serverSocket = new ServerSocket(port);
-                Socket clientSocket = serverSocket.accept();
-                PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
-                BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-        ) {
+        // Bind the channel to an address. The channel starts listening to
+        // incoming connections.
+        channel.bind(new InetSocketAddress(HOSTNAME, PORT));
 
-            String inputLine, outputLine;
+        // Mark the ServerSocketChannel as non blocking
+        channel.configureBlocking(false);
 
-            // Initiate conversation with client
-            Protocol kkp = new Protocol();
-            outputLine = kkp.processInput(null);
-            out.println(outputLine);
+        /*
+         * Create a selector that will by used for multiplexing. The selector
+         * registers the ServerSocketChannel as well as all SocketChannels that are created
+         */
+        Selector selector = Selector.open();
 
-//            //create thread to print counter value
-//            Thread t = new Thread(() -> {
-//                while (true) {
-//                    try {
-//                        System.out.println("Thread reading counter is: " + counter);
-//                        if (counter == 3) {
-//                            System.out.println("Counter has reached 3 now will terminate");
-//                            timer.cancel();//end the timer
-//                            break;//end this loop
-//                        }
-//                        Thread.sleep(1000);
-//                    } catch (InterruptedException ex) {
-//                        ex.printStackTrace();
-//                    }
-//                }
-//            });
-//
-//            timer = new Timer("MyTimer");//create a new timer
-//            timer.scheduleAtFixedRate(new TimerTask(){
-//                @Override
-//                public void run(){
-//                    System.out.println("Send: " + MSG_HEARTBEAT_PING);
-//                    out.println(MSG_HEARTBEAT_PING);
-//                    counter++;
-//                }
-//            }, 30, 200);
-//
-//            t.start();//start thread to display counter
+        /*
+         * Register the ServerSocketChannel with the selector. The OP_ACCEPT
+         * option marks a selection key as ready when the channel accepts a new connection.
+         * When the socket server accepts a connection this key is added to the list of
+         * selected keys of the selector.
+         * When asked for the selected keys, this key is returned and hence we
+         * know that a new connection has been accepted.
+         */
+        SelectionKey socketServerSelectionKey = channel.register(selector,
+                SelectionKey.OP_ACCEPT);
+        // Set property in the key that identifies the channel
+        Map<String, String> properties = new HashMap<>();
+        properties.put(CHANNEL_TYPE, SERVER_CHANNEL);
+        socketServerSelectionKey.attach(properties);
+        // Wait for the selected keys
+        for (; ; ) {
+            /*
+             * The select method is a blocking method which returns when at least
+             * one of the registered channel is selected.
+             * In this example, when the socket accepts a new connection, this method
+             * will return. Once a SocketClient is added to the list of registered
+             * channels, then this method would also return when one of the clients
+             * has data to be read or written.
+             * It is also possible to perform a nonblocking select using the
+             * selectNow() function.
+             * We can also specify the maximum time for which a select function
+             * can be blocked using the select(long timeout) function.
+             */
+            if (selector.select() == 0)
+                continue;
+            // The select method returns with a list of selected keys
+            Set<SelectionKey> selectedKeys = selector.selectedKeys();
+            Iterator<SelectionKey> iterator = selectedKeys.iterator();
+            while (iterator.hasNext()) {
+                SelectionKey key = iterator.next();
+                /*
+                 * the selection key could either by the socketserver informing
+                 * that a new connection has been made, or a socket client that
+                 * is ready for read/write we use the properties object attached
+                 * to the channel to find out the type of channel.
+                 */
+                if (((Map<?, ?>) key.attachment()).get(CHANNEL_TYPE).equals(SERVER_CHANNEL)) {
+                    // A new connection has been obtained. This channel is
+                    // therefore a socket server.
+                    ServerSocketChannel serverChannel = (ServerSocketChannel) key.channel();
+                    // Accept the new connection on the server socket. Since the
+                    // server socket channel is marked as non blocking
+                    // this channel will return null if no client is connected.
+                    SocketChannel clientSocketChannel = serverChannel.accept();
 
-            while ((inputLine = in.readLine()) != null) {
-                outputLine = kkp.processInput(inputLine);
-                out.println(outputLine);
-                if (outputLine.equals("Bye."))
-                    break;
+                    if (clientSocketChannel != null) {
+                        // Set the client connection to be non blocking
+                        clientSocketChannel.configureBlocking(false);
+                        SelectionKey clientKey = clientSocketChannel.register(
+                                selector,
+                                SelectionKey.OP_READ,
+                                SelectionKey.OP_WRITE
+                        );
+                        Map<String, String> clientProperties = new HashMap<>();
+                        clientProperties.put(CHANNEL_TYPE, CLIENT_CHANNEL);
+                        clientKey.attach(clientProperties);
+
+                        // Write something to the new created client
+                        CharBuffer buffer = CharBuffer.wrap("Hello client");
+                        while (buffer.hasRemaining()) {
+                            clientSocketChannel.write(Charset.defaultCharset().encode(buffer));
+                        }
+                        buffer.clear();
+                    }
+                } else {
+                    // Data is available for read (Buffer for reading)
+                    ByteBuffer buffer = ByteBuffer.allocate(20);
+                    SocketChannel clientChannel = (SocketChannel) key.channel();
+                    int bytesRead = 0;
+                    if (key.isReadable()) {
+                        // The channel is non blocking so keep it open till the count is >=0
+                        if ((bytesRead = clientChannel.read(buffer)) > 0) {
+                            buffer.flip();
+                            System.out.println(Charset.defaultCharset().decode(buffer));
+                            buffer.clear();
+                        }
+                        if (bytesRead < 0) {
+                            // The key is automatically invalidated once the channel is closed
+                            clientChannel.close();
+                        }
+                    }
+                }
+
+                // Once a key is handled, it needs to be removed
+                iterator.remove();
             }
-        } catch (IOException e) {
-            System.out.println("Exception caught when trying to listen on port " + port + " or listening for a connection");
-            System.out.println(e.getMessage());
         }
+    	} catch(IOException e) {
+    		e.printStackTrace();
+    	}
     }
 }
