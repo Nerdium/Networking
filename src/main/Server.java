@@ -9,18 +9,21 @@ import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 
-public class Server extends Thread{
+public class Server extends Thread {
     private final static String CLIENT_CHANNEL = "clientChannel";
     private final static String SERVER_CHANNEL = "serverChannel";
     private final static String CHANNEL_TYPE = "channelType";
 
     private final static String HOSTNAME = "localhost";
     private final static int PORT = 6969;
+    
+    private ArrayList<SocketChannel> sockets = new ArrayList<SocketChannel>();
 
     /**
      * ServerSocketChannel represents a channel for sockets that listen to
@@ -53,14 +56,13 @@ public class Server extends Thread{
          * When asked for the selected keys, this key is returned and hence we
          * know that a new connection has been accepted.
          */
-        SelectionKey socketServerSelectionKey = channel.register(selector,
-                SelectionKey.OP_ACCEPT);
+        SelectionKey socketServerSelectionKey = channel.register(selector, SelectionKey.OP_ACCEPT);
         // Set property in the key that identifies the channel
         Map<String, String> properties = new HashMap<>();
         properties.put(CHANNEL_TYPE, SERVER_CHANNEL);
         socketServerSelectionKey.attach(properties);
         // Wait for the selected keys
-        for (; ; ) {
+        while(true) {
             /*
              * The select method is a blocking method which returns when at least
              * one of the registered channel is selected.
@@ -106,30 +108,19 @@ public class Server extends Thread{
                         Map<String, String> clientProperties = new HashMap<>();
                         clientProperties.put(CHANNEL_TYPE, CLIENT_CHANNEL);
                         clientKey.attach(clientProperties);
-
+                        
+                        System.out.println(clientSocketChannel.getRemoteAddress());
+                        
+                        sockets.add(clientSocketChannel);
+                        
                         // Write something to the new created client
-                        CharBuffer buffer = CharBuffer.wrap("Hello client");
-                        while (buffer.hasRemaining()) {
-                            clientSocketChannel.write(Charset.defaultCharset().encode(buffer));
-                        }
-                        buffer.clear();
+                        write(clientSocketChannel, "Hello Client!");
                     }
                 } else {
                     // Data is available for read (Buffer for reading)
-                    ByteBuffer buffer = ByteBuffer.allocate(20);
                     SocketChannel clientChannel = (SocketChannel) key.channel();
-                    int bytesRead = 0;
                     if (key.isReadable()) {
-                        // The channel is non blocking so keep it open till the count is >=0
-                        if ((bytesRead = clientChannel.read(buffer)) > 0) {
-                            buffer.flip();
-                            System.out.println(Charset.defaultCharset().decode(buffer));
-                            buffer.clear();
-                        }
-                        if (bytesRead < 0) {
-                            // The key is automatically invalidated once the channel is closed
-                            clientChannel.close();
-                        }
+                        System.out.println(read(clientChannel));
                     }
                 }
 
@@ -141,4 +132,32 @@ public class Server extends Thread{
     		e.printStackTrace();
     	}
     }
+    
+    private void write(SocketChannel clientSocketChannel, String message) throws IOException {
+    	CharBuffer buffer = CharBuffer.wrap(message);
+        while (buffer.hasRemaining()) {
+            clientSocketChannel.write(Charset.defaultCharset().encode(buffer));
+        }
+        buffer.clear();
+    }
+    
+    public void writeAll(String message) throws IOException {
+    	for(SocketChannel clientChannel : sockets) {
+    		write(clientChannel, message);
+    	}
+    }
+    
+    private String read(SocketChannel clientChannel) throws IOException {
+    	String message = "";
+    	ByteBuffer buffer = ByteBuffer.allocate(20);
+    	
+    	while(clientChannel.read(buffer) > 0) {
+    		buffer.flip();
+    		
+    		message += Charset.defaultCharset().decode(buffer);
+    	}
+    	
+    	return message;
+    }
+    
 }

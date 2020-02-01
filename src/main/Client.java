@@ -25,14 +25,7 @@ public class Client extends Thread {
             // System.out.println("still connecting");
         }
         while (true) {
-            // See if any message has been received
-            ByteBuffer bufferA = ByteBuffer.allocate(20);
-            String message = "";
-            while (channel.read(bufferA) > 0) {
-                // Flip the buffer to start reading
-                bufferA.flip();
-                message += Charset.defaultCharset().decode(bufferA);
-            }
+            String message = read();
 
             if (message.length() > 0) {
                 System.out.println(message);
@@ -50,6 +43,20 @@ public class Client extends Thread {
         while (buffer.hasRemaining()) {
             channel.write(Charset.defaultCharset().encode(buffer));
         }
+    }
+    
+    private String read() throws IOException {
+    	
+    	String message = "";
+    	ByteBuffer buffer = ByteBuffer.allocate(20);
+    	
+    	while(channel.read(buffer) > 0) {
+    		buffer.flip();
+    		
+    		message += Charset.defaultCharset().decode(buffer);
+    	}
+    	
+    	return message;
     }
     
     
